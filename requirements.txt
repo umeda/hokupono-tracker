@@ -1,0 +1,9 @@
+certifi==2026.4.22
+cffi==2.0.0
+jplephem==2.24
+numpy==2.4.4
+pycparser==3.0
+pyttsx3==2.99
+sgp4==2.25
+skyfield==1.54
+sounddevice==0.5.5

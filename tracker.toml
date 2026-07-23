@@ -1,0 +1,50 @@
+# Station Location Settings
+latitude = 19.545
+longitude = -155.930
+elevation = 450.5  # Meters above sea level
+magnetic_declination = 9.16  # Degrees, positive eastward
+
+# Radio Configuration
+tuning_increment = 5.0  # kHz
+base_frequency_mhz = 437.800  # Default frequency if not specified per satellite
+c_ms = 299792458
+tle_url = "https://celestrak.org/NORAD/elements/gp.php"
+
+# Satellite Tracking List
+satellites = [
+    { name = "AO-123", frequency = 435.400, uplink_frequency = 145.850, norad_id = 61781 },
+    # { name = "AO-91",   frequency = 435.250, norad_id = 43017 }, # nothing heard in a while
+    # { name = "IO-86",   frequency = 435.880, norad_id = 40931 }, # very low inclination
+    { name = "ISS (ZARYA)", frequency = 437.800, uplink_frequency = 145.990, norad_id = 25544 },
+    # { name = "PO-101",  frequency = 437.500, norad_id = 43678 }, # Seems to be dying
+    { name = "SO-125",  frequency = 436.665, uplink_frequency = 145.920, norad_id = 63492 },
+    { name = "SO-50", frequency = 436.795, uplink_frequency = 145.850, norad_id = 27607 },
+    { name = "RS74S", frequency = 455.890, uplink_frequency = 145.850, norad_id = 61762 }
+]
+
+audio_device_name = "Logitech USB Headset: Audio (hw:1,0)"
+
+# Satellite Prediction Settings
+show_filtered_passes = false
+search_days = 14
+earliest_hour = 8
+latest_hour = 22
+min_elevation = 45
+
+# orbital sense and phase filtering criteria
+
+# Depending on where one is located, certain parts of the sky may be blocked by trees, 
+# mountains, buildings, etc. When ranking the quality of passes, the script needs to 
+# take into account the sense (prograde or retrograde) and phase (ascending/descending). 
+# For example I'm facing southwest, and have no visibility  to the northeast. In my case, 
+# all "\" passes must be to the southwest of me. For "/" passes, the ground path is best 
+# if it's between me and Oahu. Therefore a quality pass is to the northeast of me. 
+# I'm trying to figure out how to apply this measure of quality generically to any 
+# geographical location so this script will be of use to other users.
+
+# Part of the solution may be to a horizon mask.
+# Then for each pass calculate the elevation for every thirty degrees or so of azimuth.
+# If he elevation is below the horizon mask or below the min_elevation, it scores a zero.
+# All other points score the elevation squared. 
+# Then integrate the points over the pass to get a quality score.
+# Finally allow a pass score threshold to determine whether to show the pass or not.

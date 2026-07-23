@@ -1,0 +1,18 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: sat_predictor_05.py with iCal output",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/sat_predictor_05.py",
+            "args": [
+                "-output",
+                "ical"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
