@@ -1,7 +1,9 @@
 from logging import config
 import tomllib
 import os
+import argparse
 import urllib.parse
+import uuid
 from skyfield.api import Topos, load
 from datetime import datetime, timedelta
 
@@ -17,7 +19,7 @@ def get_tle(config, sat_entry):
     except Exception:
         return None
 
-def run_prediction(sat, observer, ts, config, show_filtered):
+def run_prediction(sat, observer, ts, config, eph):
     """Calculates and filters passes for a single satellite."""
     t0 = ts.now()
     # Get the local timezone once to use for all astimezone() calls
@@ -39,6 +41,7 @@ def run_prediction(sat, observer, ts, config, show_filtered):
             passes.append(current_pass)
             current_pass = {}
 
+    all_collected_passes = []
     for p in passes:
         reasons = []
         t_aos, t_max, t_los = p['aos'], p['max'], p['los']
@@ -49,7 +52,10 @@ def run_prediction(sat, observer, ts, config, show_filtered):
             reasons.append("inconvenient time")
 
         # Coordinates
-        diff = sat - observer
+        # To get the position of the satellite relative to the observer,
+        # we subtract the observer's position (Topos) from the satellite's position.
+        # Skyfield handles the underlying coordinate system transformations.
+        diff = sat - observer 
         pos_aos = diff.at(t_aos).altaz()
         pos_max = diff.at(t_max).altaz()
         pos_los = diff.at(t_los).altaz()
@@ -81,19 +87,39 @@ def run_prediction(sat, observer, ts, config, show_filtered):
 
         quality = "high" if not reasons else "low"
         
-        if quality == "low" and not show_filtered:
-            continue
+        # Visibility Check: Sunlit satellite and observer in darkness (Sun below -6 deg altitude)
+        # To get the Sun's position relative to the observer, we must first get the observer's
+        # barycentric position, then observe the Sun from there.
+        observer_barycentric = (eph['earth'] + observer).at(t_max)
+        sun_alt = observer_barycentric.observe(eph['sun']).apparent().altaz()[0].degrees
+        is_sunlit = sat.at(t_max).is_sunlit(eph)
+        visible = is_sunlit and sun_alt < -6
 
-        type_str = "Ascending" if is_ascending else "Descending"
-        date_str = dt_max_local.strftime('%b-%d')
-        print(f"\n{date_str} | Satellite: {sat.name} ({type_str}) - Quality: {quality}")
-        if quality == "low":
-            print(f"  Reason: {', '.join(reasons)}")
-        print(f"  AOS: {t_aos.astimezone(local_tz).strftime('%H:%M:%S')} @ {pos_aos[1].degrees:3.0f}° Az")
-        print(f"  MAX: {t_max.astimezone(local_tz).strftime('%H:%M:%S')} @ {max_alt:2.1f}° Alt, {max_az:3.0f}° Az")
-        print(f"  LOS: {t_los.astimezone(local_tz).strftime('%H:%M:%S')} @ {pos_los[1].degrees:3.0f}° Az")
+        all_collected_passes.append({
+            'name': sat.name,
+            'aos': t_aos,
+            'max': t_max,
+            'los': t_los,
+            'dt_max_local': dt_max_local,
+            'pos_aos': pos_aos,
+            'pos_max': pos_max,
+            'pos_los': pos_los,
+            'max_alt': max_alt,
+            'max_az': max_az,
+            'is_ascending': is_ascending,
+            'is_retrograde': is_retrograde,
+            'quality': quality,
+            'is_visible': visible,
+            'reasons': reasons,
+            'local_tz': local_tz
+        })
+    return all_collected_passes
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-output", choices=["ical"], help="Optional output format (e.g., ical)")
+    args, _ = parser.parse_known_args()
+
     # Load configuration
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, 'tracker.toml')
@@ -120,6 +146,7 @@ def main():
                      longitude_degrees=config['longitude'], 
                      elevation_m=config['elevation'])
     ts = load.timescale()
+    eph = load('de421.bsp')
 
     print(f"\nScanning for passes over the next {config['search_days']} days...")
     
@@ -132,10 +159,66 @@ def main():
         print("Error: Invalid selection.")
         return
 
+    all_passes = []
     for entry in to_predict:
         sat = get_tle(config, entry)
         if sat:
-            run_prediction(sat, observer, ts, config, show_filtered)
+            all_passes.extend(run_prediction(sat, observer, ts, config, eph))
+
+    # Sort all passes by time of AOS
+    all_passes.sort(key=lambda x: x['aos'].tt)
+
+    for p in all_passes:
+        if p['quality'] == "low" and not show_filtered:
+            continue
+
+        type_str = "Ascending" if p['is_ascending'] else "Descending"
+        orbit_str = "Retrograde" if p['is_retrograde'] else "Prograde"
+        
+        # Determine the ground path icon: / for SW->NE or SE->NW, \ for NW->SE or NE->SW
+        icon = "/" if p['is_ascending'] != p['is_retrograde'] else "\\"
+        # Format with ANSI inverse text codes (\033[7m) and reset (\033[0m)
+        icon_display = f"\033[7m {icon} \033[0m"
+
+        date_str = p['dt_max_local'].strftime('%b-%d')
+        print(f"\n{date_str} | Satellite: {p['name']} ({type_str}, {orbit_str}, {icon_display}) - Quality: {p['quality']}{'*' if p['is_visible'] else ''}")
+        if p['quality'] == "low":
+            print(f"  Reason: {', '.join(p['reasons'])}")
+        print(f"  AOS: {p['aos'].astimezone(p['local_tz']).strftime('%H:%M:%S')} @ {p['pos_aos'][1].degrees:3.0f}° Az")
+        print(f"  MAX: {p['max'].astimezone(p['local_tz']).strftime('%H:%M:%S')} @ {p['max_alt']:2.1f}° Alt, {p['max_az']:3.0f}° Az")
+        print(f"  LOS: {p['los'].astimezone(p['local_tz']).strftime('%H:%M:%S')} @ {p['pos_los'][1].degrees:3.0f}° Az")
+
+        if args.output == "ical":
+            aos_utc = p['aos'].utc_datetime()
+            aos_local = p['aos'].astimezone(p['local_tz'])
+            los_utc = p['los'].utc_datetime()
+            stamp = p['aos'].ts.now().utc_datetime().strftime('%Y%m%dT%H%M%SZ')
+            start = aos_utc.strftime('%Y%m%dT%H%M%SZ')
+            end = los_utc.strftime('%Y%m%dT%H%M%SZ')
+            
+            ical_content = (
+                "BEGIN:VCALENDAR\n"
+                "VERSION:2.0\n"
+                "PRODID:-//Satellite Tracker//EN\n"
+                "BEGIN:VEVENT\n"
+                f"UID:{uuid.uuid4()}\n"
+                f"DTSTAMP:{stamp}\n"
+                f"DTSTART:{start}\n"
+                f"DTEND:{end}\n"
+                f"SUMMARY:Satellite Pass: {p['name']}\n"
+                f"DESCRIPTION:Max Elevation: {p['max_alt']:.1f}°, Azimuth: {p['max_az']:.1f}°\\nOrbit: {orbit_str}, Phase: {type_str} ({icon})\n"
+                "BEGIN:VALARM\n"
+                "TRIGGER:-PT30M\n"
+                "ACTION:DISPLAY\n"
+                "DESCRIPTION:Satellite Reminder\n"
+                "END:VALARM\n"
+                "END:VEVENT\n"
+                "END:VCALENDAR"
+            )
+            fname = f"{aos_local.strftime('%Y%m%d_%H%M%S')}_{p['name'].replace(' ', '_')}.ics"
+            with open(fname, "w") as f:
+                f.write(ical_content)
+            print(f"    [iCal saved: {fname}]")
 
 if __name__ == "__main__":
     main()

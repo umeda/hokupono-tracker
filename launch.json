@@ -2,10 +2,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: sat_predictor_05.py with iCal output",
+            "name": "Python: sat_predictor.py with iCal output",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/sat_predictor_05.py",
+            "program": "${workspaceFolder}/sat_predictor.py",
             "args": [
                 "-output",
                 "ical"
